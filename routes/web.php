@@ -9,6 +9,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\WaInboxController;
 use App\Http\Controllers\WaTemplateController;
 use App\Http\Controllers\ApiClientController;
+use App\Http\Controllers\ApprovalAuditController;
 use Illuminate\Support\Facades\Http;
 
 /*
@@ -35,6 +36,11 @@ Route::prefix('api-clients')->name('api-clients.')->group(function () {
     Route::post('/{apiClient}/toggle', [ApiClientController::class, 'toggle'])->name('toggle');
     Route::post('/{apiClient}/rotate', [ApiClientController::class, 'rotate'])->name('rotate');
 });
+
+// ============================================
+// APPROVAL AUDIT ROUTES
+// ============================================
+Route::get('/approval-audits', [ApprovalAuditController::class, 'index'])->name('approval-audits.index');
 
 // ============================================
 // WA BLAST ROUTES

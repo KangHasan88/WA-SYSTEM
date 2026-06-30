@@ -288,6 +288,9 @@
                 <a href="{{ route('api-clients.index') }}" class="nav-link-custom {{ request()->routeIs('api-clients.*') ? 'active' : '' }}">
                     <i class="fas fa-key"></i> API Clients
                 </a>
+                <a href="{{ route('approval-audits.index') }}" class="nav-link-custom {{ request()->routeIs('approval-audits.*') ? 'active' : '' }}">
+                    <i class="fas fa-clipboard-check"></i> Approval Audit
+                </a>
                 <div class="date-display">
                     <i class="fas fa-calendar"></i>
                     <span id="current-date"></span>

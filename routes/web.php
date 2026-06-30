@@ -8,6 +8,7 @@ use App\Http\Controllers\WAScheduleController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\WaInboxController;
 use App\Http\Controllers\WaTemplateController;
+use App\Http\Controllers\ApiClientController;
 use Illuminate\Support\Facades\Http;
 
 /*
@@ -24,6 +25,16 @@ Route::get('/', function () {
 // DASHBOARD ROUTES
 // ============================================
 Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard.index');
+
+// ============================================
+// API CLIENT MANAGEMENT ROUTES
+// ============================================
+Route::prefix('api-clients')->name('api-clients.')->group(function () {
+    Route::get('/', [ApiClientController::class, 'index'])->name('index');
+    Route::post('/', [ApiClientController::class, 'store'])->name('store');
+    Route::post('/{apiClient}/toggle', [ApiClientController::class, 'toggle'])->name('toggle');
+    Route::post('/{apiClient}/rotate', [ApiClientController::class, 'rotate'])->name('rotate');
+});
 
 // ============================================
 // WA BLAST ROUTES

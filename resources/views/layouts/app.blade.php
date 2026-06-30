@@ -285,6 +285,9 @@
                 <a href="{{ route('wa-templates.index') }}" class="nav-link-custom {{ request()->routeIs('wa-templates.*') ? 'active' : '' }}">
                     <i class="fas fa-file-alt"></i> Templates
                 </a>
+                <a href="{{ route('api-clients.index') }}" class="nav-link-custom {{ request()->routeIs('api-clients.*') ? 'active' : '' }}">
+                    <i class="fas fa-key"></i> API Clients
+                </a>
                 <div class="date-display">
                     <i class="fas fa-calendar"></i>
                     <span id="current-date"></span>

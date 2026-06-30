@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ContactGroup;
 use App\Models\Contact;
+use App\Services\PhoneNumberSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -95,27 +96,27 @@ class ContactGroupController extends Controller
         $validator = Validator::make($request->all(), [
             'group_id' => 'required|exists:contact_groups,id',
             'number' => 'required|string|max:20',
-            'name' => 'nullable|string|max:100'
+            'name' => 'nullable|string|max:100',
+            'status' => 'nullable|in:active,blocked,unsubscribed',
         ]);
         
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
         
-        // Format number
-        $number = preg_replace('/\D/', '', $request->number);
-        if (substr($number, 0, 1) === '0') {
-            $number = '62' . substr($number, 1);
-        }
-        if (substr($number, 0, 2) !== '62') {
-            $number = '62' . $number;
+        $number = app(PhoneNumberSanitizer::class)->normalize($request->number);
+
+        if ($number === null) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['number' => [PhoneNumberSanitizer::INVALID_REASON]],
+            ], 422);
         }
         
-        $contact = Contact::create([
-            'group_id' => $request->group_id,
-            'number' => $number,
-            'name' => $request->name
-        ]);
+        $contact = Contact::updateOrCreate(
+            ['group_id' => $request->group_id, 'number' => $number],
+            ['name' => $request->name, 'status' => $request->input('status', 'active')]
+        );
         
         return response()->json(['success' => true, 'contact' => $contact]);
     }
@@ -129,24 +130,39 @@ class ContactGroupController extends Controller
         
         $validator = Validator::make($request->all(), [
             'number' => 'required|string|max:20',
-            'name' => 'nullable|string|max:100'
+            'name' => 'nullable|string|max:100',
+            'status' => 'nullable|in:active,blocked,unsubscribed',
         ]);
         
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
         
-        $number = preg_replace('/\D/', '', $request->number);
-        if (substr($number, 0, 1) === '0') {
-            $number = '62' . substr($number, 1);
+        $number = app(PhoneNumberSanitizer::class)->normalize($request->number);
+
+        if ($number === null) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['number' => [PhoneNumberSanitizer::INVALID_REASON]],
+            ], 422);
         }
-        if (substr($number, 0, 2) !== '62') {
-            $number = '62' . $number;
+
+        $duplicate = Contact::where('group_id', $contact->group_id)
+            ->where('number', $number)
+            ->where('id', '!=', $contact->id)
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'success' => false,
+                'errors' => ['number' => ['Nomor ini sudah ada di grup yang sama.']],
+            ], 422);
         }
         
         $contact->update([
             'number' => $number,
-            'name' => $request->name
+            'name' => $request->name,
+            'status' => $request->input('status', $contact->status ?? 'active'),
         ]);
         
         return response()->json(['success' => true, 'contact' => $contact]);
@@ -170,7 +186,9 @@ class ContactGroupController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'group_id' => 'required|exists:contact_groups,id',
-            'file' => 'required|file|mimes:xlsx,xls,csv,txt'
+            'file' => 'required|file|mimes:csv,txt'
+        ], [
+            'file.mimes' => 'Import kontak saat ini menerima CSV/TXT. Simpan file Excel sebagai CSV terlebih dahulu.',
         ]);
         
         if ($validator->fails()) {
@@ -183,36 +201,47 @@ class ContactGroupController extends Controller
         $extension = $file->getClientOriginalExtension();
         $numbers = [];
         
-        if ($extension === 'csv' || $extension === 'txt') {
-            $handle = fopen($file->getPathname(), 'r');
-            while (($data = fgetcsv($handle)) !== false) {
-                $number = trim($data[0]);
-                $name = $data[1] ?? null;
-                if (!empty($number)) {
-                    $numbers[] = ['number' => $number, 'name' => $name];
-                }
-            }
-            fclose($handle);
-        } else {
-            return back()->with('error', 'Please use CSV format for import');
+        if (! in_array($extension, ['csv', 'txt'], true)) {
+            return back()->with('error', 'Import kontak saat ini menerima CSV/TXT. Simpan file Excel sebagai CSV terlebih dahulu.');
         }
+
+        $handle = fopen($file->getPathname(), 'r');
+        while (($data = fgetcsv($handle)) !== false) {
+            $number = trim($data[0] ?? '');
+            $name = $data[1] ?? null;
+            if (!empty($number) && strtolower($number) !== 'nomor') {
+                $numbers[] = ['number' => $number, 'name' => $name];
+            }
+        }
+        fclose($handle);
         
         $imported = 0;
         $failed = 0;
+        $duplicates = 0;
+        $invalid = [];
+        $sanitizer = app(PhoneNumberSanitizer::class);
+        $seen = [];
         
         foreach ($numbers as $item) {
             try {
-                $number = preg_replace('/\D/', '', $item['number']);
-                if (substr($number, 0, 1) === '0') {
-                    $number = '62' . substr($number, 1);
+                $number = $sanitizer->normalize($item['number']);
+
+                if ($number === null) {
+                    $invalid[] = $item['number'];
+                    $failed++;
+                    continue;
                 }
-                if (substr($number, 0, 2) !== '62') {
-                    $number = '62' . $number;
+
+                if (isset($seen[$number])) {
+                    $duplicates++;
+                    continue;
                 }
+
+                $seen[$number] = true;
                 
                 Contact::updateOrCreate(
                     ['group_id' => $group_id, 'number' => $number],
-                    ['name' => $item['name']]
+                    ['name' => $item['name'], 'status' => 'active']
                 );
                 $imported++;
             } catch (\Exception $e) {
@@ -220,8 +249,14 @@ class ContactGroupController extends Controller
             }
         }
         
+        $message = "Import selesai: {$imported} kontak aktif disimpan, {$duplicates} duplikat dilewati, {$failed} invalid/gagal.";
+
+        if ($invalid !== []) {
+            $message .= ' Nomor invalid contoh: ' . implode(', ', array_slice($invalid, 0, 5));
+        }
+
         return redirect()->route('contact-groups.index', ['group_id' => $group_id])
-            ->with('success', "Imported {$imported} contacts, {$failed} failed");
+            ->with($failed > 0 ? 'error' : 'success', $message);
     }
     
     /**
@@ -260,7 +295,9 @@ class ContactGroupController extends Controller
      */
     public function getGroups()
     {
-        $groups = ContactGroup::withCount('contacts')->orderBy('name')->get();
+        $groups = ContactGroup::withCount([
+            'contacts' => fn ($query) => $query->where('status', 'active'),
+        ])->orderBy('name')->get();
         return response()->json(['groups' => $groups]);
     }
     
@@ -270,7 +307,10 @@ class ContactGroupController extends Controller
     public function getContacts($groupId)
     {
         $group = ContactGroup::findOrFail($groupId);
-        $contacts = $group->contacts()->orderBy('name')->get();
+        $contacts = $group->contacts()
+            ->where('status', 'active')
+            ->orderBy('name')
+            ->get();
         return response()->json(['contacts' => $contacts]);
     }
 }

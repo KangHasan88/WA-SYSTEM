@@ -12,7 +12,8 @@ class Contact extends Model
     protected $fillable = [
         'group_id',
         'number',
-        'name'
+        'name',
+        'status'
     ];
     
     public function group(): BelongsTo
@@ -31,5 +32,10 @@ class Contact extends Model
             $number = '62' . $number;
         }
         return $number;
+    }
+
+    public function getIsSendableAttribute(): bool
+    {
+        return $this->status === 'active';
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\WASchedule;
+use App\Services\PhoneNumberSanitizer;
 use App\Services\WaRateLimitService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -31,11 +32,31 @@ class SendScheduledMessages extends Command
             $schedule->status = 'processing';
             $schedule->save();
             
-            $numbers = $schedule->numbers;
+            $sanitizer = app(PhoneNumberSanitizer::class);
+            $normalized = $sanitizer->normalizeMany($schedule->numbers ?? []);
+            $filtered = $sanitizer->excludeBlockedContacts($normalized['numbers']);
+            $numbers = $filtered['numbers'];
             $total = count($numbers);
             $sent = 0;
-            $failed = 0;
+            $failed = count($normalized['invalid']) + count($filtered['blocked']);
             $rateLimiter = app(WaRateLimitService::class);
+
+            if ($normalized['invalid'] !== [] || $filtered['blocked'] !== []) {
+                Log::warning("SCHEDULE HYGIENE - Some numbers skipped for schedule #{$schedule->id}", [
+                    'invalid_count' => count($normalized['invalid']),
+                    'duplicate_count' => $normalized['duplicates'],
+                    'blocked_count' => count($filtered['blocked']),
+                ]);
+            }
+
+            if ($numbers === []) {
+                $schedule->sent_count = 0;
+                $schedule->failed_count = $failed;
+                $schedule->status = 'completed';
+                $schedule->save();
+                $this->warn("Schedule #{$schedule->id} completed with no active valid numbers.");
+                continue;
+            }
             
             foreach ($numbers as $index => $number) {
                 try {

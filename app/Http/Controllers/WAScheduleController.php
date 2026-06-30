@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\WASchedule;
+use App\Services\PhoneNumberSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -33,13 +34,38 @@ class WAScheduleController extends Controller
         if ($validator->fails()) {
             return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
         }
+
+        $sanitizer = app(PhoneNumberSanitizer::class);
+        $normalized = $sanitizer->normalizeMany($request->numbers);
+
+        if (! empty($normalized['invalid'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ada nomor invalid.',
+                'errors' => [
+                    'numbers' => [
+                        'invalid' => array_slice($normalized['invalid'], 0, 10),
+                        'rule' => PhoneNumberSanitizer::INVALID_REASON,
+                    ],
+                ],
+            ], 422);
+        }
+
+        $filtered = $sanitizer->excludeBlockedContacts($normalized['numbers']);
+
+        if ($filtered['numbers'] === []) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak ada nomor aktif yang bisa dijadwalkan.',
+            ], 422);
+        }
         
         $schedule = WASchedule::create([
             'title' => $request->title,
             'message' => $request->message,
             'image_url' => $request->image_url,
-            'numbers' => $request->numbers,
-            'total_numbers' => count($request->numbers),
+            'numbers' => $filtered['numbers'],
+            'total_numbers' => count($filtered['numbers']),
             'scheduled_at' => $request->scheduled_at,
             'status' => 'pending',
             'sent_count' => 0,
@@ -49,7 +75,11 @@ class WAScheduleController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Pesan berhasil dijadwalkan',
-            'schedule' => $schedule
+            'schedule' => $schedule,
+            'skipped' => [
+                'duplicates' => $normalized['duplicates'],
+                'blocked' => count($filtered['blocked']),
+            ],
         ]);
     }
     

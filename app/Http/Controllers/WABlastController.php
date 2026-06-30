@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\PhoneNumberSanitizer;
 use App\Services\WaRateLimitService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -32,11 +33,18 @@ class WABlastController extends Controller
             return back()->withErrors($validator)->withInput();
         }
 
-        $numbers = preg_split('/\r\n|\r|\n/', $request->numbers);
-        
-        $numbers = array_filter(array_map(function ($num) {
-            return trim(preg_replace('/\s+/', '', $num));
-        }, $numbers));
+        $rawNumbers = preg_split('/\r\n|\r|\n/', $request->numbers);
+        $sanitizer = app(PhoneNumberSanitizer::class);
+        $normalized = $sanitizer->normalizeMany($rawNumbers ?: []);
+
+        if (! empty($normalized['invalid'])) {
+            return back()
+                ->withInput()
+                ->with('error', 'Ada nomor invalid: ' . implode(', ', array_slice($normalized['invalid'], 0, 5)) . '. ' . PhoneNumberSanitizer::INVALID_REASON);
+        }
+
+        $filtered = $sanitizer->excludeBlockedContacts($normalized['numbers']);
+        $numbers = $filtered['numbers'];
 
         if (empty($numbers)) {
             return back()->with('error', 'Minimal 1 nomor WhatsApp harus diisi');
@@ -54,9 +62,17 @@ class WABlastController extends Controller
             $totalDispatched++;
         }
 
-        $message = "✅ {$totalDispatched} pesan sedang diproses.\n";
-        $message .= "⏱️ Estimasi selesai: " . $rateLimiter->estimateCompletionMinutes($totalDispatched) . " menit\n";
-        $message .= "🛡️ Rate limit aktif: maksimal " . WaRateLimitService::MAX_PER_HOUR . " penerima/jam.\n";
+        $message = "{$totalDispatched} pesan sedang diproses.\n";
+        $message .= "Estimasi selesai: " . $rateLimiter->estimateCompletionMinutes($totalDispatched) . " menit\n";
+        $message .= "Rate limit aktif: maksimal " . WaRateLimitService::MAX_PER_HOUR . " penerima/jam.\n";
+
+        if ($normalized['duplicates'] > 0) {
+            $message .= "{$normalized['duplicates']} nomor duplikat dilewati.\n";
+        }
+
+        if (! empty($filtered['blocked'])) {
+            $message .= count($filtered['blocked']) . " nomor blocked/unsubscribed dilewati.\n";
+        }
 
         return back()->with('success', $message);
     }

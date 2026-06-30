@@ -10,6 +10,7 @@ use App\Http\Controllers\WaInboxController;
 use App\Http\Controllers\WaTemplateController;
 use App\Http\Controllers\ApiClientController;
 use App\Http\Controllers\ApprovalAuditController;
+use App\Http\Controllers\DeliveryReportController;
 use Illuminate\Support\Facades\Http;
 
 /*
@@ -41,6 +42,14 @@ Route::prefix('api-clients')->name('api-clients.')->group(function () {
 // APPROVAL AUDIT ROUTES
 // ============================================
 Route::get('/approval-audits', [ApprovalAuditController::class, 'index'])->name('approval-audits.index');
+
+// ============================================
+// DELIVERY REPORT ROUTES
+// ============================================
+Route::prefix('delivery-reports')->name('delivery-reports.')->group(function () {
+    Route::get('/', [DeliveryReportController::class, 'index'])->name('index');
+    Route::post('/{message}/retry', [DeliveryReportController::class, 'retry'])->name('retry');
+});
 
 // ============================================
 // WA BLAST ROUTES

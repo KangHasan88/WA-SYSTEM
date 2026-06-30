@@ -291,6 +291,9 @@
                 <a href="{{ route('approval-audits.index') }}" class="nav-link-custom {{ request()->routeIs('approval-audits.*') ? 'active' : '' }}">
                     <i class="fas fa-clipboard-check"></i> Approval Audit
                 </a>
+                <a href="{{ route('delivery-reports.index') }}" class="nav-link-custom {{ request()->routeIs('delivery-reports.*') ? 'active' : '' }}">
+                    <i class="fas fa-truck-fast"></i> Delivery
+                </a>
                 <div class="date-display">
                     <i class="fas fa-calendar"></i>
                     <span id="current-date"></span>

@@ -1,0 +1,171 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\WaInbox;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
+
+class WaInboxController extends Controller
+{
+    // Webhook endpoint untuk menerima pesan dari Node.js
+    public function webhook(Request $request)
+    {
+        // Validasi secret key (optional - comment jika ingin testing)
+        // $secret = $request->header('X-Webhook-Secret');
+        // if ($secret !== 'kurmigo_secret_key_2024') {
+        //     return response()->json(['error' => 'Unauthorized'], 401);
+        // }
+        
+        $data = $request->all();
+        
+        Log::info('Webhook received:', $data);
+        
+        // Cek apakah pesan sudah ada (deduplication)
+        if (isset($data['messageId'])) {
+            $exists = WaInbox::where('message_id', $data['messageId'])->exists();
+            if ($exists) {
+                return response()->json(['message' => 'Duplicate ignored'], 200);
+            }
+        }
+        
+        // Simpan ke database
+        $inbox = WaInbox::create([
+            'from_number' => $data['from'] ?? null,
+            'from_name' => $data['from_name'] ?? null,
+            'message' => $data['message'] ?? '',
+            'message_id' => $data['messageId'] ?? null,
+            'type' => isset($data['hasMedia']) && $data['hasMedia'] ? 'media' : ($data['type'] ?? 'text'),
+            'media_url' => $data['media']['url'] ?? null,
+            'caption' => $data['caption'] ?? null,
+            'is_read' => false,
+            'is_replied' => false,
+            'received_at' => now(),
+        ]);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Message stored',
+            'id' => $inbox->id
+        ]);
+    }
+    
+    // Tampilkan halaman inbox
+    public function index()
+    {
+        $conversations = WaInbox::getConversations(20);
+        $unreadCount = WaInbox::getUnreadCount();
+        
+        // Add unread count to each conversation
+        foreach ($conversations as $conv) {
+            $conv->unread_count = WaInbox::getUnreadCountPerConversation($conv->from_number);
+        }
+        
+        return view('wa-inbox.index', compact('conversations', 'unreadCount'));
+    }
+    
+    // Tampilkan percakapan dengan nomor tertentu
+    public function conversation($number)
+    {
+        $messages = WaInbox::getConversationWith($number);
+        $unreadCount = WaInbox::getUnreadCount();
+        
+        // Mark as read
+        WaInbox::markConversationAsRead($number);
+        
+        return view('wa-inbox.conversation', compact('messages', 'number', 'unreadCount'));
+    }
+    
+    // API: Get conversations (for AJAX)
+    public function apiConversations()
+    {
+        $conversations = WaInbox::getConversations(50);
+        $unreadCount = WaInbox::getUnreadCount();
+        
+        // Add unread count to each conversation
+        foreach ($conversations as $conv) {
+            $conv->unread_count = WaInbox::getUnreadCountPerConversation($conv->from_number);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'conversations' => $conversations,
+            'unread_count' => $unreadCount
+        ]);
+    }
+    
+    // API: Get messages with specific number
+    public function apiMessages($number)
+    {
+        $messages = WaInbox::getConversationWith($number);
+        WaInbox::markConversationAsRead($number);
+        
+        return response()->json([
+            'success' => true,
+            'messages' => $messages,
+            'number' => $number
+        ]);
+    }
+    
+    // API: Mark conversation as read
+    public function markAsRead($number)
+    {
+        WaInbox::markConversationAsRead($number);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Marked as read'
+        ]);
+    }
+    
+    // Reply to message via API
+    public function reply(Request $request, $number)
+    {
+        $request->validate([
+            'message' => 'required|string|max:2000'
+        ]);
+        
+        try {
+            // Kirim ke Node.js service
+            $response = Http::post('http://127.0.0.1:7070/send', [
+                'number' => $number,
+                'message' => $request->message
+            ]);
+            
+            $result = $response->json();
+            
+            if (isset($result['status']) && $result['status'] === 'success') {
+                // Update replied status
+                WaInbox::where('from_number', $number)
+                    ->where('is_replied', false)
+                    ->update(['is_replied' => true]);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Reply sent successfully'
+                ]);
+            }
+            
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to send message'
+            ], 500);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    // Delete message
+    public function destroy($id)
+    {
+        $message = WaInbox::findOrFail($id);
+        $message->delete();
+        
+        return response()->json(['success' => true]);
+    }
+}

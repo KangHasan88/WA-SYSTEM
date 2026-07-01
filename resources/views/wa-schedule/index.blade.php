@@ -11,6 +11,7 @@
     
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { max-width: 100%; overflow-x: hidden; }
         body { font-family: 'Inter', sans-serif; background: #f5f7fa; color: #1e293b; }
         
         /* ================= BLUE DARK + ORANGE + WHITE THEME ================= */
@@ -59,7 +60,7 @@
         .page-title p { font-size: 0.7rem; color: var(--k-gray-500); margin: 0.1rem 0 0 0; }
         .logo-icon { width: 34px; height: 34px; background: var(--k-white); border: 1px solid var(--k-gray-200); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; margin-right: 0.75rem; }
         .logo-icon i { color: var(--k-blue-dark); font-size: 1rem; }
-        .top-bar-right { display: flex; align-items: center; gap: 1rem; }
+        .top-bar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
         
         .nav-link-custom {
             display: inline-flex;
@@ -139,9 +140,9 @@
         
         .k-card-header h3 i { color: var(--k-blue-dark); font-size: 1rem; }
         
-        .table-container { overflow-x: auto; }
+        .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         
-        .k-table { width: 100%; border-collapse: collapse; }
+        .k-table { width: 100%; min-width: 760px; border-collapse: collapse; }
         
         .k-table th { 
             text-align: left; 
@@ -338,10 +339,55 @@
             border-color: var(--k-orange);
         }
         
+        @media (max-width: 1200px) {
+            .top-bar {
+                align-items: flex-start;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+
+            .top-bar-right {
+                width: 100%;
+                gap: 0.5rem;
+                overflow-x: auto;
+                padding-bottom: 0.25rem;
+                scrollbar-width: thin;
+            }
+
+            .nav-link-custom,
+            .date-display {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+        }
+
         @media (max-width: 768px) {
             .k-table th, .k-table td { padding: 0.5rem; font-size: 0.65rem; }
             .main-container { padding: 1rem; }
             .k-card-header { flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+            .top-bar {
+                padding: 0.8rem 1rem;
+                position: relative;
+            }
+
+            .page-title {
+                width: 100%;
+            }
+
+            .page-title h1 {
+                font-size: 1rem;
+                line-height: 1.2;
+            }
+
+            .page-title p {
+                max-width: 260px;
+                line-height: 1.35;
+            }
+
+            .top-bar-right {
+                margin: 0 -1rem;
+                padding: 0 1rem 0.35rem;
+            }
         }
         
         .text-warning { color: var(--k-orange) !important; }

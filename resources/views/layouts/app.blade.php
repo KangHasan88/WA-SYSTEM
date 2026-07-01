@@ -15,6 +15,7 @@
     <!-- Global CSS -->
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { max-width: 100%; overflow-x: hidden; }
         body { font-family: 'Inter', sans-serif; background: #f8fafc; color: #1e293b; }
         
         :root {
@@ -62,7 +63,7 @@
         .page-title p { font-size: 0.7rem; color: var(--k-gray-500); margin: 0.1rem 0 0 0; }
         .logo-icon { width: 34px; height: 34px; background: var(--k-white); border: 1px solid var(--k-gray-200); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; margin-right: 0.75rem; }
         .logo-icon i { color: var(--k-navy); font-size: 1rem; }
-        .top-bar-right { display: flex; align-items: center; gap: 1rem; }
+        .top-bar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
         
         .nav-link-custom {
             display: inline-flex;
@@ -248,6 +249,86 @@
         
         .text-muted { color: var(--k-gray-500) !important; }
         .text-danger { color: #dc2626 !important; }
+
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .table-responsive table {
+            min-width: 760px;
+        }
+
+        @media (max-width: 1500px) {
+            .top-bar {
+                align-items: flex-start;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+
+            .top-bar-right {
+                width: 100%;
+                gap: 0.5rem;
+                overflow-x: auto;
+                padding-bottom: 0.25rem;
+                scrollbar-width: thin;
+            }
+
+            .nav-link-custom,
+            .date-display,
+            .status-indicator {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .top-bar {
+                padding: 0.8rem 1rem;
+                position: relative;
+            }
+
+            .page-title {
+                width: 100%;
+            }
+
+            .page-title h1 {
+                font-size: 1rem;
+                line-height: 1.2;
+            }
+
+            .page-title p {
+                max-width: 260px;
+                line-height: 1.35;
+            }
+
+            .top-bar-right {
+                margin: 0 -1rem;
+                padding: 0 1rem 0.35rem;
+            }
+
+            .main-container {
+                padding: 1rem;
+            }
+
+            .k-card {
+                border-radius: 0.75rem;
+            }
+
+            .k-card:hover {
+                transform: none;
+            }
+
+            .k-card-header,
+            .k-card-body {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+
+            .table-responsive {
+                border-radius: 0 0 0.75rem 0.75rem;
+            }
+        }
     </style>
     
     @stack('styles')

@@ -13,6 +13,7 @@
     
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { max-width: 100%; overflow-x: hidden; }
         body { font-family: 'Inter', sans-serif; background: #f5f7fa; color: #1e293b; }
         
         /* ================= BLUE DARK + ORANGE + WHITE THEME ================= */
@@ -61,7 +62,7 @@
         .page-title p { font-size: 0.7rem; color: var(--k-gray-500); margin: 0.1rem 0 0 0; }
         .logo-icon { width: 34px; height: 34px; background: var(--k-white); border: 1px solid var(--k-gray-200); border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; margin-right: 0.75rem; }
         .logo-icon i { color: var(--k-blue-dark); font-size: 1rem; }
-        .top-bar-right { display: flex; align-items: center; gap: 1rem; }
+        .top-bar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
         
         .nav-link-custom {
             display: inline-flex;
@@ -149,6 +150,7 @@
             display: flex;
             height: calc(100vh - 120px);
             min-height: 500px;
+            min-width: 0;
         }
         
         .conversations-list {
@@ -210,7 +212,7 @@
         .form-label { font-size: 0.6rem; font-weight: 600; margin-bottom: 0.25rem; color: var(--k-gray-600); }
         .form-control-sm, .form-select-sm { font-size: 0.7rem; border-radius: 0.5rem; }
         
-        .chat-area { flex: 1; display: flex; flex-direction: column; background: #f8fafc; }
+        .chat-area { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8fafc; }
         .chat-header { padding: 0.75rem 1.25rem; border-bottom: 1px solid var(--k-gray-200); background: var(--k-white); }
         .chat-header .chat-number { font-weight: 600; font-size: 0.9rem; color: var(--k-blue-dark); }
         .chat-messages { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
@@ -368,7 +370,83 @@
         .empty-chat { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--k-gray-400); text-align: center; }
         .empty-chat i { font-size: 3rem; margin-bottom: 1rem; opacity: 0.5; color: var(--k-orange); }
         
-        @media (max-width: 768px) { .conversations-list { width: 280px; } .message-item { max-width: 85%; } }
+        @media (max-width: 1200px) {
+            .top-bar {
+                align-items: flex-start;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+            }
+
+            .top-bar-right {
+                width: 100%;
+                gap: 0.5rem;
+                overflow-x: auto;
+                padding-bottom: 0.25rem;
+                scrollbar-width: thin;
+            }
+
+            .nav-link-custom,
+            .date-display {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .top-bar {
+                padding: 0.8rem 1rem;
+                position: relative;
+            }
+
+            .page-title {
+                width: 100%;
+            }
+
+            .page-title h1 {
+                font-size: 1rem;
+                line-height: 1.2;
+            }
+
+            .page-title p {
+                max-width: 260px;
+                line-height: 1.35;
+            }
+
+            .top-bar-right {
+                margin: 0 -1rem;
+                padding: 0 1rem 0.35rem;
+            }
+
+            .main-container {
+                padding: 1rem;
+            }
+
+            .inbox-container {
+                display: block;
+                height: auto;
+                min-height: 0;
+            }
+
+            .conversations-list {
+                width: 100%;
+                max-height: 420px;
+                border-right: 0;
+                border-bottom: 1px solid var(--k-gray-200);
+            }
+
+            .chat-area {
+                min-height: 360px;
+            }
+
+            .empty-chat {
+                min-height: 300px;
+                padding: 2rem 1rem;
+            }
+
+            .message-item {
+                max-width: 85%;
+            }
+        }
         
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .message-item { animation: fadeIn 0.2s ease; }

@@ -42,6 +42,8 @@ class ApiClientController extends Controller
             'name' => $validated['name'],
             'slug' => Str::slug($validated['slug']),
             'token_hash' => ApiClient::hashToken($plainToken),
+            'token_created_at' => now(),
+            'token_rotated_at' => null,
             'scopes' => array_values($validated['scopes']),
             'rate_limit_per_minute' => $validated['rate_limit_per_minute'],
             'is_active' => true,
@@ -69,6 +71,7 @@ class ApiClientController extends Controller
 
         $apiClient->forceFill([
             'token_hash' => ApiClient::hashToken($plainToken),
+            'token_rotated_at' => now(),
             'is_active' => true,
         ])->save();
 

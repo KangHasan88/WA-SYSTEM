@@ -33,6 +33,8 @@ class GenerateApiClientToken extends Command
             [
                 'name' => $name,
                 'token_hash' => ApiClient::hashToken($plainToken),
+                'token_created_at' => now(),
+                'token_rotated_at' => ApiClient::where('slug', $slug)->exists() ? now() : null,
                 'scopes' => $scopes ?: ['*'],
                 'rate_limit_per_minute' => $rate,
                 'is_active' => true,

@@ -11,6 +11,8 @@ class ApiClient extends Model
         'name',
         'slug',
         'token_hash',
+        'token_created_at',
+        'token_rotated_at',
         'scopes',
         'rate_limit_per_minute',
         'is_active',
@@ -20,6 +22,8 @@ class ApiClient extends Model
     protected $casts = [
         'scopes' => 'array',
         'is_active' => 'boolean',
+        'token_created_at' => 'datetime',
+        'token_rotated_at' => 'datetime',
         'last_used_at' => 'datetime',
     ];
 

@@ -5,7 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\WaInbox;
 use App\Models\Contact;
 use App\Models\FollowUpReminder;
-use App\Models\ApprovalRequest;
+use App\Services\ApprovalReplyParser;
+use App\Services\PhoneNumberSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
@@ -16,24 +17,65 @@ class WaInboxController extends Controller
     // Webhook endpoint untuk menerima pesan dari Node.js
     public function webhook(Request $request)
     {
+        if (!$this->isTrustedWebhookSource($request)) {
+            Log::warning('Webhook ignored: untrusted source', [
+                'ip' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Webhook source is not allowed',
+            ], 403);
+        }
+
         $data = $request->all();
         
         Log::info('Webhook received:', $data);
         
-        // Bersihkan from_number dari @lid dan karakter aneh
-        $fromNumber = $data['from'] ?? null;
-        if ($fromNumber) {
-            $fromNumber = preg_replace('/@.*$/', '', $fromNumber);
-            $fromNumber = preg_replace('/\D/', '', $fromNumber);
-            $fromNumber = $this->formatNumber($fromNumber);
+        $fromNumber = $this->normalizeIncomingNumber($data['from'] ?? null);
+        $message = (string) ($data['message'] ?? $data['body'] ?? $data['caption'] ?? '');
+        $messageId = $data['messageId'] ?? $data['id'] ?? null;
+        $fingerprint = $this->buildWebhookFingerprint($fromNumber, $message, $messageId, $data);
+
+        if (!$fromNumber) {
+            Log::warning('Webhook ignored: invalid sender number', [
+                'from' => $data['from'] ?? null,
+                'message_id' => $messageId,
+                'fingerprint' => $fingerprint,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid sender number',
+                'ignored_reason' => 'invalid_sender',
+            ], 422);
         }
         
-        // Cek apakah pesan sudah ada (deduplication)
-        if (isset($data['messageId'])) {
-            $exists = WaInbox::where('message_id', $data['messageId'])->exists();
-            if ($exists) {
-                return response()->json(['message' => 'Duplicate ignored'], 200);
-            }
+        if ($messageId && WaInbox::where('message_id', $messageId)->exists()) {
+            Log::info('Webhook ignored: duplicate message_id', [
+                'message_id' => $messageId,
+                'from_number' => $fromNumber,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Duplicate ignored',
+                'ignored_reason' => 'duplicate_message_id',
+            ], 200);
+        }
+
+        if (WaInbox::where('webhook_fingerprint', $fingerprint)->exists()) {
+            Log::info('Webhook ignored: duplicate fingerprint', [
+                'fingerprint' => $fingerprint,
+                'from_number' => $fromNumber,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Duplicate ignored',
+                'ignored_reason' => 'duplicate_fingerprint',
+            ], 200);
         }
         
         // Cek apakah nomor sudah ada di contacts
@@ -66,8 +108,9 @@ class WaInboxController extends Controller
         $inbox = WaInbox::create([
             'from_number' => $fromNumber,
             'from_name' => $fromName,
-            'message' => $data['message'] ?? '',
-            'message_id' => $data['messageId'] ?? null,
+            'message' => $message,
+            'message_id' => $messageId,
+            'webhook_fingerprint' => $fingerprint,
             'type' => isset($data['hasMedia']) && $data['hasMedia'] ? 'media' : ($data['type'] ?? 'text'),
             'media_url' => $mediaUrl,
             'media_mime' => $mediaMime,
@@ -75,6 +118,9 @@ class WaInboxController extends Controller
             'media_filename' => $mediaFilename,
             'media_thumbnail' => $mediaThumbnail,
             'caption' => $data['caption'] ?? null,
+            'raw_payload' => $data,
+            'webhook_source_ip' => $request->ip(),
+            'webhook_user_agent' => substr((string) $request->userAgent(), 0, 255),
             'direction' => 'incoming',
             'is_read' => false,
             'is_replied' => false,
@@ -84,7 +130,17 @@ class WaInboxController extends Controller
             'received_at' => now(),
         ]);
 
-        $approvalResult = $this->processApprovalReply($fromNumber, $data['message'] ?? '');
+        $approvalResult = app(ApprovalReplyParser::class)->process($fromNumber, $message);
+
+        if ($approvalResult !== null) {
+            $inbox->update(['approval_result' => $approvalResult]);
+        } else {
+            Log::info('Webhook stored as regular inbox message', [
+                'inbox_id' => $inbox->id,
+                'from_number' => $fromNumber,
+                'fingerprint' => $fingerprint,
+            ]);
+        }
         
         return response()->json([
             'success' => true,
@@ -199,77 +255,47 @@ class WaInboxController extends Controller
         return $cleanNumber;
     }
 
-    private function processApprovalReply(?string $fromNumber, string $message): ?array
+    private function normalizeIncomingNumber(?string $number): ?string
     {
-        if (!$fromNumber) {
+        if (!$number) {
             return null;
         }
 
-        $text = trim(preg_replace('/\s+/', ' ', strtoupper($message)));
+        $cleanNumber = preg_replace('/@.*$/', '', $number);
 
-        if (!preg_match('/^(YES|NO)\s+(\d{6})$/', $text, $matches)) {
-            return null;
+        return app(PhoneNumberSanitizer::class)->normalize($cleanNumber);
+    }
+
+    private function buildWebhookFingerprint(?string $fromNumber, string $message, ?string $messageId, array $payload): string
+    {
+        if ($messageId) {
+            return hash('sha256', 'message_id:' . $messageId);
         }
 
-        $decision = $matches[1];
-        $code = $matches[2];
-        $formattedNumber = $this->formatNumber($fromNumber);
+        return hash('sha256', implode('|', [
+            $fromNumber ?: 'unknown',
+            trim($message),
+            $payload['timestamp'] ?? $payload['time'] ?? now()->format('Y-m-d H:i'),
+            $payload['type'] ?? 'text',
+            $payload['media']['url'] ?? '',
+        ]));
+    }
 
-        $approval = ApprovalRequest::where('code', $code)
-            ->where('to_number', $formattedNumber)
-            ->where('status', 'pending')
-            ->latest()
-            ->first();
+    private function isTrustedWebhookSource(Request $request): bool
+    {
+        $token = config('services.wa_webhook.token') ?: env('WA_WEBHOOK_TOKEN');
 
-        if (!$approval) {
-            Log::warning('Approval reply ignored: no matching pending approval', [
-                'from_number' => $formattedNumber,
-                'code' => $code,
-                'decision' => $decision,
-            ]);
-
-            return [
-                'matched' => false,
-                'reason' => 'not_found',
-                'code' => $code,
-            ];
+        if ($token && hash_equals($token, (string) $request->header('X-WA-Webhook-Token'))) {
+            return true;
         }
 
-        if ($approval->expires_at->isPast()) {
-            $approval->update(['status' => 'expired']);
+        $ip = $request->ip();
 
-            Log::warning('Approval reply ignored: approval expired', [
-                'approval_id' => $approval->approval_id,
-                'from_number' => $formattedNumber,
-                'code' => $code,
-            ]);
-
-            return [
-                'matched' => true,
-                'approval_id' => $approval->approval_id,
-                'status' => 'expired',
-            ];
+        if (in_array($ip, ['127.0.0.1', '::1'], true)) {
+            return true;
         }
 
-        $status = $decision === 'YES' ? 'approved' : 'rejected';
-        $approval->update([
-            'status' => $status,
-            'approved_at' => $status === 'approved' ? now() : null,
-            'rejected_at' => $status === 'rejected' ? now() : null,
-        ]);
-
-        Log::info('Approval reply processed', [
-            'approval_id' => $approval->approval_id,
-            'from_number' => $formattedNumber,
-            'code' => $code,
-            'status' => $status,
-        ]);
-
-        return [
-            'matched' => true,
-            'approval_id' => $approval->approval_id,
-            'status' => $status,
-        ];
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
     }
     
     // Reply to message via API (with media support)

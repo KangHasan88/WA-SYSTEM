@@ -14,6 +14,7 @@ class WaInbox extends Model
         'from_name',
         'message',
         'message_id',
+        'webhook_fingerprint',
         'type',
         'media_url',
         'media_mime',
@@ -21,6 +22,11 @@ class WaInbox extends Model
         'media_filename',
         'media_thumbnail',
         'caption',
+        'raw_payload',
+        'approval_result',
+        'ignored_reason',
+        'webhook_source_ip',
+        'webhook_user_agent',
         'direction',
         'is_read',
         'is_replied',
@@ -36,7 +42,9 @@ class WaInbox extends Model
         'is_replied' => 'boolean',
         'received_at' => 'datetime',
         'media_size' => 'integer',
-        'follow_up_date' => 'datetime'
+        'follow_up_date' => 'datetime',
+        'raw_payload' => 'array',
+        'approval_result' => 'array'
     ];
     
     // Lead status options

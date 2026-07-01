@@ -482,8 +482,8 @@
                                         <th style="width: 160px;">Jadwal (WIB)</th>
                                         <th style="width: 70px;">Jumlah</th>
                                         <th style="width: 90px;">Status</th>
-                                        <th style="width: 80px;">Progress</th>
-                                        <th style="width: 100px;">Aksi</th>
+                                        <th style="width: 150px;">Progress</th>
+                                        <th style="width: 150px;">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody id="schedules-tbody">
@@ -507,6 +507,7 @@
                                                 $badgeText = 'Pending';
                                                 if ($schedule->status == 'completed') { $badgeClass = 'success'; $badgeText = 'Completed'; }
                                                 elseif ($schedule->status == 'processing') { $badgeClass = 'warning'; $badgeText = 'Processing'; }
+                                                elseif ($schedule->status == 'paused') { $badgeClass = 'warning'; $badgeText = 'Paused'; }
                                                 elseif ($schedule->status == 'cancelled') { $badgeClass = 'error'; $badgeText = 'Cancelled'; }
                                                 elseif ($schedule->status == 'failed') { $badgeClass = 'error'; $badgeText = 'Failed'; }
                                             @endphp
@@ -514,17 +515,33 @@
                                         </td>
                                         <td class="text-center">
                                             <div class="small">
-                                                {{ $schedule->sent_count }}/{{ $schedule->total_numbers }}
+                                                {{ $schedule->dispatched_count ?? $schedule->sent_count }}/{{ $schedule->total_numbers }} dispatched
                                             </div>
                                             <div class="progress-container">
-                                                <div class="progress-fill" style="width: {{ $schedule->total_numbers > 0 ? ($schedule->sent_count / $schedule->total_numbers) * 100 : 0 }}%;"></div>
+                                                <div class="progress-fill" style="width: {{ $schedule->total_numbers > 0 ? (($schedule->dispatched_count ?? $schedule->sent_count) / $schedule->total_numbers) * 100 : 0 }}%;"></div>
                                             </div>
+                                            @if($schedule->next_dispatch_at && in_array($schedule->status, ['pending', 'processing']))
+                                                <div class="text-muted small" style="font-size: 0.58rem; margin-top: 0.2rem;">
+                                                    Next: {{ $schedule->next_dispatch_at->copy()->addHours(7)->format('d/m H:i') }}
+                                                </div>
+                                            @endif
                                         </td>
                                         <td>
                                             <button class="k-btn k-btn-outline" onclick="viewSchedule({{ $schedule->id }})" data-tooltip="Detail">
                                                 <i class="fas fa-eye"></i>
                                             </button>
-                                            @if($schedule->status == 'pending')
+                                            @if(in_array($schedule->status, ['pending', 'processing']))
+                                                <button class="k-btn k-btn-warning" onclick="pauseSchedule({{ $schedule->id }})" data-tooltip="Pause">
+                                                    <i class="fas fa-pause"></i>
+                                                </button>
+                                                <button class="k-btn k-btn-warning" onclick="cancelSchedule({{ $schedule->id }})" data-tooltip="Batalkan">
+                                                    <i class="fas fa-ban"></i>
+                                                </button>
+                                            @endif
+                                            @if($schedule->status == 'paused')
+                                                <button class="k-btn k-btn-primary" onclick="resumeSchedule({{ $schedule->id }})" data-tooltip="Resume">
+                                                    <i class="fas fa-play"></i>
+                                                </button>
                                                 <button class="k-btn k-btn-warning" onclick="cancelSchedule({{ $schedule->id }})" data-tooltip="Batalkan">
                                                     <i class="fas fa-ban"></i>
                                                 </button>
@@ -659,6 +676,7 @@
                 let statusBadge = '';
                 if (s.status == 'pending') statusBadge = '<span class="badge-status info">Pending</span>';
                 else if (s.status == 'processing') statusBadge = '<span class="badge-status warning">Processing</span>';
+                else if (s.status == 'paused') statusBadge = '<span class="badge-status warning">Paused</span>';
                 else if (s.status == 'completed') statusBadge = '<span class="badge-status success">Completed</span>';
                 else if (s.status == 'cancelled') statusBadge = '<span class="badge-status error">Cancelled</span>';
                 else statusBadge = '<span class="badge-status error">Failed</span>';
@@ -666,6 +684,8 @@
                 const scheduledDate = new Date(s.scheduled_at);
                 const wibDate = new Date(scheduledDate.getTime() + (7 * 60 * 60 * 1000));
                 const formattedDate = wibDate.toLocaleString('id-ID');
+                const plan = s.campaign_plan || {};
+                const nextDispatch = s.next_dispatch_at ? new Date(new Date(s.next_dispatch_at).getTime() + (7 * 60 * 60 * 1000)).toLocaleString('id-ID') : '-';
                 
                 modalBody.innerHTML = `
                     <div>
@@ -687,7 +707,19 @@
                     </div>
                     <div>
                         <div class="detail-label"><i class="fas fa-chart-line me-1"></i> Progress</div>
-                        <div class="detail-value">${s.sent_count || 0} / ${s.total_numbers} terkirim</div>
+                        <div class="detail-value">${s.dispatched_count || s.sent_count || 0} / ${s.total_numbers} dispatch dibuat</div>
+                    </div>
+                    <div>
+                        <div class="detail-label"><i class="fas fa-layer-group me-1"></i> Campaign Plan</div>
+                        <div class="detail-value">
+                            ${plan.batch_count || '-'} batch, maksimal ${plan.max_per_hour || 100} penerima/jam,
+                            jeda ${plan.interval_seconds_min || 36}-${plan.interval_seconds_max || 55} detik.
+                            <br>Estimasi selesai: ${plan.estimated_minutes || '-'} menit.
+                        </div>
+                    </div>
+                    <div>
+                        <div class="detail-label"><i class="fas fa-forward me-1"></i> Next Dispatch</div>
+                        <div class="detail-value">${nextDispatch}</div>
                     </div>
                     <div>
                         <div class="detail-label"><i class="fas fa-clock me-1"></i> Dibuat</div>
@@ -707,6 +739,30 @@
                     refreshSchedules(); // Refresh tanpa reload
                 } catch (error) {
                     alert('Gagal membatalkan jadwal');
+                }
+            }
+        }
+
+        async function pauseSchedule(id) {
+            if (confirm('Pause campaign ini? Batch berikutnya tidak akan berjalan sampai di-resume.')) {
+                try {
+                    await axios.post(`/wa-schedule/${id}/pause`);
+                    alert('Campaign di-pause');
+                    refreshSchedules();
+                } catch (error) {
+                    alert(error.response?.data?.message || 'Gagal pause campaign');
+                }
+            }
+        }
+
+        async function resumeSchedule(id) {
+            if (confirm('Lanjutkan campaign ini sekarang?')) {
+                try {
+                    await axios.post(`/wa-schedule/${id}/resume`);
+                    alert('Campaign dilanjutkan');
+                    refreshSchedules();
+                } catch (error) {
+                    alert(error.response?.data?.message || 'Gagal resume campaign');
                 }
             }
         }

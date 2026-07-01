@@ -28,7 +28,12 @@ class SendScheduledMessages extends Command
         
         foreach ($schedules as $schedule) {
             $this->info("Processing schedule #{$schedule->id} - {$schedule->title}");
-            
+
+            if (in_array($schedule->status, ['paused', 'cancelled', 'completed'], true)) {
+                $this->warn("Schedule #{$schedule->id} skipped because status is {$schedule->status}.");
+                continue;
+            }
+
             $schedule->status = 'processing';
             $schedule->save();
             
@@ -53,25 +58,42 @@ class SendScheduledMessages extends Command
                 $schedule->sent_count = 0;
                 $schedule->failed_count = $failed;
                 $schedule->status = 'completed';
+                $schedule->completed_at = now();
                 $schedule->save();
                 $this->warn("Schedule #{$schedule->id} completed with no active valid numbers.");
                 continue;
             }
+
+            $startIndex = (int) ($schedule->next_number_index ?? 0);
+            $batchNumbers = array_slice($numbers, $startIndex, WaRateLimitService::MAX_PER_HOUR);
+
+            if ($batchNumbers === []) {
+                $schedule->status = 'completed';
+                $schedule->completed_at = now();
+                $schedule->next_dispatch_at = null;
+                $schedule->save();
+                $this->info("Schedule #{$schedule->id} already fully dispatched.");
+                continue;
+            }
+
+            $this->info("Dispatching batch from index {$startIndex}, size " . count($batchNumbers));
             
-            foreach ($numbers as $index => $number) {
+            foreach ($batchNumbers as $index => $number) {
                 try {
                     // DEBUG LOG: sebelum dispatch
                     Log::info("SCHEDULE DEBUG - Dispatching job for schedule #{$schedule->id}", [
                         'number' => $number,
                         'title' => $schedule->title,
-                        'attempt' => $index + 1
+                        'attempt' => $startIndex + $index + 1
                     ]);
                     
                     $slot = $rateLimiter->dispatchMessage(
                         $number, 
                         $schedule->message, 
                         $schedule->image_url,
-                        $schedule->title
+                        $schedule->title,
+                        null,
+                        $schedule->id
                     );
                     
                     $sent++;
@@ -92,22 +114,33 @@ class SendScheduledMessages extends Command
                     ]);
                 }
                 
-                // Update progress setiap 10 nomor
-                if (($index + 1) % 10 == 0 || ($index + 1) == $total) {
-                    $schedule->sent_count = $sent;
+                if (($index + 1) % 10 == 0 || ($index + 1) == count($batchNumbers)) {
+                    $schedule->dispatched_count = $startIndex + $sent;
+                    $schedule->sent_count = $schedule->dispatched_count;
                     $schedule->failed_count = $failed;
                     $schedule->save();
-                    $this->info("Progress: {$sent}/{$total} dispatched, {$failed} failed");
+                    $this->info("Progress: {$schedule->dispatched_count}/{$total} dispatched, {$failed} failed");
                 }
             }
-            
-            // Final update
-            $schedule->sent_count = $sent;
+
+            $nextIndex = $startIndex + $sent;
+            $schedule->next_number_index = $nextIndex;
+            $schedule->dispatched_count = $nextIndex;
+            $schedule->sent_count = $nextIndex;
             $schedule->failed_count = $failed;
-            $schedule->status = 'completed';
+
+            if ($nextIndex >= $total) {
+                $schedule->status = 'completed';
+                $schedule->next_dispatch_at = null;
+                $schedule->completed_at = now();
+            } else {
+                $schedule->status = 'processing';
+                $schedule->next_dispatch_at = now()->startOfHour()->addHour();
+            }
+
             $schedule->save();
             
-            $this->info("Schedule #{$schedule->id} completed. Dispatched: {$sent}, Failed: {$failed}");
+            $this->info("Schedule #{$schedule->id} batch completed. Dispatched total: {$nextIndex}/{$total}, Failed: {$failed}");
         }
         
         $this->info('All schedules processed.');

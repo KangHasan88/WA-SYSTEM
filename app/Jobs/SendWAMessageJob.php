@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\ApiMessageRequest;
+use App\Models\WASchedule;
 use App\Models\WALog;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
@@ -21,21 +22,27 @@ class SendWAMessageJob implements ShouldQueue
     protected $imageUrl;
     protected $title;
     protected $apiMessageRequestId;
+    protected $waScheduleId;
     public $tries = 5;
     public $backoff = [5, 15, 30, 60, 120];
     public $timeout = 120;
 
-    public function __construct($number, $message, $imageUrl = null, $title = null, $apiMessageRequestId = null)
+    public function __construct($number, $message, $imageUrl = null, $title = null, $apiMessageRequestId = null, $waScheduleId = null)
     {
         $this->number = $number;
         $this->message = $message;
         $this->imageUrl = $imageUrl;
         $this->title = $title;
         $this->apiMessageRequestId = $apiMessageRequestId;
+        $this->waScheduleId = $waScheduleId;
     }
 
     public function handle(): void
     {
+        if (! $this->scheduleAllowsSend()) {
+            return;
+        }
+
         $this->updateApiMessageRequest('sending');
 
         Log::info("==========================================");
@@ -194,6 +201,56 @@ class SendWAMessageJob implements ShouldQueue
             'status' => $status,
             'updated_at' => now(),
         ]);
+    }
+
+    private function scheduleAllowsSend(): bool
+    {
+        if (! $this->waScheduleId) {
+            return true;
+        }
+
+        $schedule = WASchedule::find($this->waScheduleId);
+
+        if (! $schedule) {
+            Log::warning("SendWAMessageJob skipped because schedule was deleted", [
+                'schedule_id' => $this->waScheduleId,
+                'number' => $this->number,
+            ]);
+            return false;
+        }
+
+        if ($schedule->status === 'paused') {
+            Log::info("SendWAMessageJob released because schedule is paused", [
+                'schedule_id' => $this->waScheduleId,
+                'number' => $this->number,
+            ]);
+            $this->release(300);
+            return false;
+        }
+
+        if (in_array($schedule->status, ['cancelled', 'failed'], true)) {
+            Log::warning("SendWAMessageJob cancelled before send", [
+                'schedule_id' => $this->waScheduleId,
+                'number' => $this->number,
+                'status' => $schedule->status,
+            ]);
+
+            WALog::create([
+                'number' => $this->number,
+                'message' => $this->message,
+                'title' => $this->title,
+                'image_url' => $this->imageUrl,
+                'status' => 'cancelled',
+                'response' => json_encode([
+                    'reason' => 'Campaign status is ' . $schedule->status,
+                    'schedule_id' => $this->waScheduleId,
+                ]),
+            ]);
+
+            return false;
+        }
+
+        return true;
     }
 
     private function formatNumber($number): string

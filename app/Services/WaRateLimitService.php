@@ -19,11 +19,12 @@ class WaRateLimitService
         string $message,
         ?string $imageUrl = null,
         ?string $title = null,
-        ?int $apiMessageRequestId = null
+        ?int $apiMessageRequestId = null,
+        ?int $waScheduleId = null
     ): array {
         $slot = $this->reserveSlot();
 
-        SendWAMessageJob::dispatch($number, $message, $imageUrl, $title, $apiMessageRequestId)
+        SendWAMessageJob::dispatch($number, $message, $imageUrl, $title, $apiMessageRequestId, $waScheduleId)
             ->delay(now()->addSeconds($slot['delay_seconds']));
 
         return $slot;
@@ -35,11 +36,41 @@ class WaRateLimitService
             return 0;
         }
 
-        $hours = intdiv(max(0, $recipientCount - 1), self::MAX_PER_HOUR);
-        $position = (($recipientCount - 1) % self::MAX_PER_HOUR);
-        $seconds = ($hours * 3600) + ($position * self::BASE_INTERVAL_SECONDS) + self::JITTER_MAX_SECONDS;
+        $seconds = max(0, $recipientCount - 1) * (self::BASE_INTERVAL_SECONDS + self::JITTER_MAX_SECONDS);
 
         return max(1, (int) ceil($seconds / 60));
+    }
+
+    public function buildCampaignPlan(int $recipientCount, ?CarbonInterface $from = null): array
+    {
+        $from = CarbonImmutable::instance($from ?: now());
+        $batchCount = (int) ceil($recipientCount / self::MAX_PER_HOUR);
+        $estimatedMinutes = $this->estimateCompletionMinutes($recipientCount);
+        $batches = [];
+
+        for ($batch = 0; $batch < $batchCount; $batch++) {
+            $startIndex = ($batch * self::MAX_PER_HOUR) + 1;
+            $endIndex = min($recipientCount, ($batch + 1) * self::MAX_PER_HOUR);
+
+            $batches[] = [
+                'batch' => $batch + 1,
+                'start_recipient' => $startIndex,
+                'end_recipient' => $endIndex,
+                'recipient_count' => ($endIndex - $startIndex) + 1,
+                'earliest_dispatch_at' => $from->addHours($batch)->toISOString(),
+            ];
+        }
+
+        return [
+            'recipient_count' => $recipientCount,
+            'max_per_hour' => self::MAX_PER_HOUR,
+            'batch_count' => $batchCount,
+            'interval_seconds_min' => self::BASE_INTERVAL_SECONDS + self::JITTER_MIN_SECONDS,
+            'interval_seconds_max' => self::BASE_INTERVAL_SECONDS + self::JITTER_MAX_SECONDS,
+            'estimated_minutes' => $estimatedMinutes,
+            'estimated_completed_at' => $from->addMinutes($estimatedMinutes)->toISOString(),
+            'batches' => $batches,
+        ];
     }
 
     public function previewSchedule(int $recipientCount, ?CarbonInterface $from = null): array
@@ -72,39 +103,29 @@ class WaRateLimitService
 
     private function reserveSlot(): array
     {
-        $now = CarbonImmutable::instance(now());
+        return Cache::lock('wa_rate_limit_slot_lock', 10)->block(5, function () {
+            $now = CarbonImmutable::instance(now());
+            $nextAvailableRaw = Cache::get('wa_next_available_send_at');
+            $nextAvailable = $nextAvailableRaw ? CarbonImmutable::parse($nextAvailableRaw) : $now->addSeconds(5);
 
-        for ($hourOffset = 0; $hourOffset < 72; $hourOffset++) {
-            $hourStart = $now->startOfHour()->addHours($hourOffset);
-            $key = 'wa_send_slots:' . $hourStart->format('YmdH');
-            $count = Cache::increment($key);
-
-            if ($count === 1) {
-                Cache::put($key, 1, now()->addDays(3));
-            }
-
-            if ($count > self::MAX_PER_HOUR) {
-                continue;
+            if ($nextAvailable->lessThan($now->addSeconds(5))) {
+                $nextAvailable = $now->addSeconds(5);
             }
 
             $jitter = random_int(self::JITTER_MIN_SECONDS, self::JITTER_MAX_SECONDS);
-            $scheduledAt = $hourStart
-                ->addSeconds(($count - 1) * self::BASE_INTERVAL_SECONDS)
-                ->addSeconds($jitter);
+            $spacing = self::BASE_INTERVAL_SECONDS + $jitter;
+            $followingSlot = $nextAvailable->addSeconds($spacing);
 
-            if ($scheduledAt->lessThan($now->addSeconds(5))) {
-                $scheduledAt = $now->addSeconds(random_int(5, 20));
-            }
+            Cache::put('wa_next_available_send_at', $followingSlot->toISOString(), now()->addDays(7));
 
             return [
-                'hour_key' => $key,
-                'position' => $count,
-                'scheduled_at' => $scheduledAt->toISOString(),
-                'delay_seconds' => (int) ceil(max(0, $scheduledAt->diffInSeconds($now, false) * -1)),
+                'hour_key' => 'global-spacing',
+                'position' => Cache::increment('wa_send_slot_sequence'),
+                'scheduled_at' => $nextAvailable->toISOString(),
+                'delay_seconds' => (int) ceil(max(0, $nextAvailable->diffInSeconds($now, false) * -1)),
+                'spacing_seconds' => $spacing,
                 'max_per_hour' => self::MAX_PER_HOUR,
             ];
-        }
-
-        throw new \RuntimeException('Unable to reserve WhatsApp send slot within 72 hours.');
+        });
     }
 }

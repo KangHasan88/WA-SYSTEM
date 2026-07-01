@@ -243,9 +243,12 @@ Route::prefix('contact-groups')->name('contact-groups.')->group(function () {
 // WA SCHEDULE ROUTES
 // ============================================
 Route::prefix('wa-schedule')->name('wa-schedule.')->group(function () {
+    Route::post('/preview', [WAScheduleController::class, 'preview'])->name('preview');
     Route::post('/', [WAScheduleController::class, 'store'])->name('store');
     Route::get('/', [WAScheduleController::class, 'index'])->name('index');
     Route::get('/{id}', [WAScheduleController::class, 'show'])->name('show');
     Route::delete('/{id}', [WAScheduleController::class, 'destroy'])->name('destroy');
+    Route::post('/{id}/pause', [WAScheduleController::class, 'pause'])->name('pause');
+    Route::post('/{id}/resume', [WAScheduleController::class, 'resume'])->name('resume');
     Route::post('/{id}/cancel', [WAScheduleController::class, 'cancel'])->name('cancel');
 });

@@ -1,11 +1,12 @@
 # WA System SaaS Multi-Tenant Architecture
 
-Dokumen ini menjadi blueprint migrasi WA System dari single-tenant/single operational WA account menjadi SaaS multi-tenant dan multi nomor WhatsApp.
+Dokumen ini menjadi blueprint migrasi WA System dari single-tenant/single operational WA account menjadi module/service WhatsApp multi-tenant yang dikontrol dari central SaaS Usaha-Up.
 
 ## Tujuan
 
-- Satu aplikasi dan satu database bisa melayani banyak tenant.
-- Satu tenant bisa punya satu atau banyak nomor WhatsApp.
+- Central SaaS tetap berada di project Usaha-Up.
+- WA System menjadi module/service WhatsApp yang mengikuti tenant dan module entitlement dari Usaha-Up.
+- Satu tenant Usaha-Up bisa punya satu atau banyak nomor WhatsApp di WA System.
 - Nomor WA production yang sekarang sudah connected tetap menjadi default WA account dan tidak dipaksa scan QR ulang.
 - Semua data operasional terisolasi berdasarkan `tenant_id` dan `wa_account_id`.
 - Implementasi dilakukan bertahap agar risiko downtime kecil.
@@ -17,14 +18,46 @@ Dokumen ini menjadi blueprint migrasi WA System dari single-tenant/single operat
 Gunakan:
 
 ```text
-Single Laravel app
-Single primary database
-Multi tenant dengan tenant_id
-Multi nomor WhatsApp dengan wa_account_id
-Node sender multi-session
+Usaha-Up = central SaaS/source of truth
+WA System = remote module/service WhatsApp
+Central tenant identity = tenants di Usaha-Up
+WA tenant mapping = tenant_id / central_tenant_id di WA System
+Multi nomor WhatsApp = wa_accounts di WA System
+Node sender = multi-session gateway
 ```
 
-Jangan langsung membuat database baru per tenant. Database per tenant bisa dipertimbangkan nanti untuk enterprise/compliance, tetapi tahap awal SaaS lebih aman dengan satu database dan isolasi ketat di aplikasi.
+Jangan membuat central tenant baru yang terpisah di WA System. Tenant, subscription, module access, dan provisioning harus mengacu ke Usaha-Up.
+
+Database WA System tetap boleh satu database operasional untuk semua tenant pada tahap awal, dengan isolasi ketat di aplikasi. Database per tenant bisa dipertimbangkan nanti untuk enterprise/compliance.
+
+## Central Usaha-Up Integration
+
+Project central:
+
+```text
+/var/www/kurmigo-usahaup
+```
+
+Komponen central yang sudah tersedia dan harus menjadi acuan:
+
+```text
+app/Models/Central/Tenant.php
+app/Models/Central/TenantUser.php
+app/Models/Central/TenantModule.php
+app/Models/Central/Module.php
+app/Models/Central/Subscription.php
+app/Services/Central/TenantModuleProvisioner.php
+app/Services/Tenant/RemoteModuleLaunchSigner.php
+app/Http/Middleware/ResolveTenant.php
+```
+
+Implikasi:
+
+- Usaha-Up membuat dan mengelola tenant.
+- Usaha-Up mengaktifkan module WA System untuk tenant.
+- Usaha-Up meluncurkan WA System dengan signed launch/context.
+- WA System menyimpan mapping tenant dari Usaha-Up, bukan menjadi master tenant sendiri.
+- API token WA System harus terkait tenant/module yang diberi akses oleh Usaha-Up.
 
 ### Strategi URL Tenant
 
@@ -34,7 +67,7 @@ Tahap awal:
 https://wa.kurmigo.id
 ```
 
-Tenant context ditentukan dari user login dan tenant switcher.
+Tenant context ditentukan dari signed launch/module context dari Usaha-Up atau user/module session yang dibuat oleh launch tersebut.
 
 Tahap berikutnya, jika perlu branding tenant:
 
@@ -48,29 +81,35 @@ Tahap advanced:
 https://{tenant_slug}.wa.kurmigo.id
 ```
 
-Rekomendasi eksekusi: mulai dari login-based tenant context, lalu tambah path tenant setelah data model stabil.
+Rekomendasi eksekusi: mulai dari Usaha-Up signed launch context. Path tenant/subdomain hanya dipakai jika memang dibutuhkan untuk direct access/branding setelah module context stabil.
 
 ## Entity Target
 
-### tenants
+### tenant_mappings atau tenants
+
+WA System boleh punya tabel lokal untuk cache/mapping tenant Usaha-Up. Tabel ini bukan source of truth central.
 
 ```text
 id
-name
-slug
+central_tenant_id
+central_tenant_uuid
+name_snapshot
+slug_snapshot
 status
-plan
+plan_snapshot
 timezone
 settings
+synced_at
 created_at
 updated_at
 ```
 
-### tenant_users
+### tenant_users atau module_users
 
 ```text
 id
 tenant_id
+central_tenant_user_id
 user_id
 role
 is_default
@@ -78,7 +117,7 @@ created_at
 updated_at
 ```
 
-Role awal:
+Role awal di WA System mengikuti role/permission dari Usaha-Up, lalu dipetakan ke:
 
 - `owner`
 - `admin`
@@ -156,7 +195,7 @@ queue.failed_jobs=0
 
 ## Tenant Default
 
-Saat migrasi pertama, buat tenant default:
+Saat migrasi pertama, buat atau mapping tenant default dari Usaha-Up:
 
 ```text
 name: Kurmigo Internal
@@ -165,12 +204,12 @@ status: active
 plan: internal
 ```
 
-Semua data existing dibackfill ke tenant ini.
+Semua data existing WA System dibackfill ke mapping tenant default ini.
 
 Nomor WA yang sekarang connected dibuat sebagai WA account default:
 
 ```text
-tenant: Kurmigo Internal
+tenant: Kurmigo Internal dari Usaha-Up
 label: Main WhatsApp
 session_id: current-active-session
 status: connected
@@ -183,26 +222,28 @@ rate_limit_per_hour: 100
 
 ### Phase 1: Schema Additive
 
-1. Buat tabel `tenants`.
-2. Buat tabel `tenant_users`.
-3. Buat tabel `wa_accounts`.
-4. Tambahkan nullable `tenant_id` ke tabel operasional.
-5. Tambahkan nullable `wa_account_id` ke tabel operasional yang terkait nomor WA.
-6. Tambahkan index, tetapi jangan aktifkan constraint ketat dulu.
+1. Pastikan module WA System terdaftar di Usaha-Up.
+2. Buat tabel mapping tenant lokal di WA System bila belum ada.
+3. Buat tabel user/module access lokal bila WA System butuh cache akses.
+4. Buat tabel `wa_accounts`.
+5. Tambahkan nullable `tenant_id` ke tabel operasional.
+6. Tambahkan nullable `wa_account_id` ke tabel operasional yang terkait nomor WA.
+7. Tambahkan index, tetapi jangan aktifkan constraint ketat dulu.
 
 Alasan nullable dulu: migration bisa deploy tanpa memecahkan query lama.
 
 ### Phase 2: Default Backfill
 
-1. Insert tenant default.
-2. Insert wa_account default.
-3. Backfill semua data existing ke `tenant_id` default.
-4. Backfill semua data kirim/inbox/approval/schedule ke `wa_account_id` default.
-5. Jalankan audit:
+1. Ambil tenant default dari Usaha-Up atau buat tenant Kurmigo Internal di Usaha-Up jika belum ada.
+2. Insert mapping tenant default di WA System.
+3. Insert wa_account default.
+4. Backfill semua data existing ke `tenant_id` default.
+5. Backfill semua data kirim/inbox/approval/schedule ke `wa_account_id` default.
+6. Jalankan audit:
    ```bash
    php8.2 artisan wa:smoke-deploy --json
    ```
-6. Pastikan nomor existing masih connected:
+7. Pastikan nomor existing masih connected:
    ```bash
    php8.2 artisan wa:health-check --json --no-alert
    ```
@@ -210,12 +251,10 @@ Alasan nullable dulu: migration bisa deploy tanpa memecahkan query lama.
 ### Phase 3: Tenant Context
 
 1. Tambahkan middleware `SetTenantContext`.
-2. Web request mengambil tenant dari:
-   - tenant default user
-   - tenant switcher session
-   - path `/t/{tenant_slug}` jika sudah aktif
+2. Web request mengambil tenant dari signed launch/session Usaha-Up.
 3. API request mengambil tenant dari `api_clients.tenant_id`.
-4. Semua controller mulai filter data berdasarkan tenant context.
+4. Direct login WA System hanya boleh untuk operator/internal yang sudah punya tenant mapping.
+5. Semua controller mulai filter data berdasarkan tenant context.
 
 ### Phase 4: WA Account Context
 
@@ -290,7 +329,8 @@ Worker tidak boleh resolve tenant dari global/default saat memproses job lama.
 | Session existing kehapus/rename | Nomor harus scan QR ulang | Jangan ubah `wa-sender/.wwebjs_auth`; map session existing dulu |
 | Query lupa filter tenant | Data bocor antar tenant | Tenant scope, code audit, smoke permission |
 | Rate limit masih global | Tenant saling menghambat | Cache key rate limiter pakai `wa_account_id` |
-| API client belum punya tenant | Token bisa akses data global | Wajib backfill `api_clients.tenant_id` |
+| API client belum punya tenant | Token bisa akses data global | Wajib backfill `api_clients.tenant_id` dari mapping Usaha-Up |
+| Central Usaha-Up dan WA mapping tidak sinkron | Tenant salah akses module | Signed launch + sync/audit tenant mapping |
 | Job lama tidak punya tenant | Worker salah konteks | Graceful fallback ke tenant default hanya untuk job legacy |
 | QR session salah tenant | Tenant bisa scan/memakai nomor tenant lain | Endpoint QR wajib authorize tenant + wa_account owner |
 
@@ -304,9 +344,10 @@ php8.2 artisan wa:saas-smoke --json
 
 Minimal check:
 
-- tenant default ada
+- tenant default dari Usaha-Up ada dan tersinkron ke WA System
 - wa_account default ada
 - nomor existing health connected
+- signed launch/context dari Usaha-Up tervalidasi
 - tenant A tidak bisa baca tenant B
 - API token tenant A tidak bisa send dari wa_account tenant B
 - dummy send tetap `Queue::fake()` dan tidak kirim WA live
@@ -318,7 +359,7 @@ Sebelum deploy dianggap aman:
 
 1. `php8.2 artisan wa:smoke-deploy --json` hasil `ok=true`.
 2. `php8.2 artisan wa:health-check --json --no-alert` hasil `whatsapp.connected=true`.
-3. Data existing masih muncul di tenant default.
+3. Data existing masih muncul di tenant default yang berasal dari Usaha-Up.
 4. Nomor WA existing tidak force reset.
 5. Tidak ada folder session WhatsApp yang dihapus/rename.
 6. Kanban diupdate dengan commit hash dan hasil smoke.
@@ -327,7 +368,7 @@ Sebelum deploy dianggap aman:
 
 Eksekusi rekomendasi:
 
-1. `[AB] Tenant Foundation & Default Tenant Migration`
+1. `[AB] Tenant Foundation & Default Tenant Migration` dengan Usaha-Up sebagai source of truth
 2. `[AC] WA Account Model & Existing Session Mapping`
 3. `[AF] Tenant Data Isolation & Permission Hardening`
 4. `[AD] Multi-Session Node Gateway`

@@ -12,3 +12,8 @@ Schedule::command('wa:health-check')
     ->everyFiveMinutes()
     ->withoutOverlapping()
     ->runInBackground();
+
+Schedule::command('wa:retention-cleanup --purge')
+    ->dailyAt('02:10')
+    ->withoutOverlapping()
+    ->runInBackground();

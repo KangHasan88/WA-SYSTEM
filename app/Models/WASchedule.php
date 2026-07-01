@@ -10,6 +10,7 @@ class WASchedule extends Model
     protected $table = 'wa_schedules';
     
     protected $fillable = [
+        'tenant_id',
         'title',
         'message',
         'image_url',

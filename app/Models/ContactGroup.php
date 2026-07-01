@@ -10,6 +10,7 @@ class ContactGroup extends Model
     protected $table = 'contact_groups';
     
     protected $fillable = [
+        'tenant_id',
         'name',
         'description'
     ];

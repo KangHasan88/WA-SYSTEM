@@ -10,6 +10,7 @@ class WaInbox extends Model
     protected $table = 'wa_inbox';
     
     protected $fillable = [
+        'tenant_id',
         'from_number',
         'from_name',
         'message',

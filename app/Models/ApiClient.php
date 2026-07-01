@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 class ApiClient extends Model
 {
     protected $fillable = [
+        'tenant_id',
         'name',
         'slug',
         'token_hash',

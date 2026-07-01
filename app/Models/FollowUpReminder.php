@@ -9,6 +9,7 @@ class FollowUpReminder extends Model
     protected $table = 'follow_up_reminders';
     
     protected $fillable = [
+        'tenant_id',
         'wa_inbox_id',
         'customer_number',
         'customer_name',

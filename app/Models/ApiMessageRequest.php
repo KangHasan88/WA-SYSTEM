@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class ApiMessageRequest extends Model
 {
     protected $fillable = [
+        'tenant_id',
         'message_id',
         'api_client_id',
         'to_number',

@@ -10,6 +10,7 @@ class Contact extends Model
     protected $table = 'contacts';
     
     protected $fillable = [
+        'tenant_id',
         'group_id',
         'number',
         'name',

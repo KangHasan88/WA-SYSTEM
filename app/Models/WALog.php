@@ -9,6 +9,7 @@ class WALog extends Model
     protected $table = 'wa_logs';
 
     protected $fillable = [
+        'tenant_id',
         'number',
         'message',
         'title',

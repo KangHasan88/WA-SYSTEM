@@ -10,6 +10,7 @@ class WALog extends Model
 
     protected $fillable = [
         'tenant_id',
+        'wa_account_id',
         'number',
         'message',
         'title',

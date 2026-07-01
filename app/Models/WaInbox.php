@@ -11,6 +11,7 @@ class WaInbox extends Model
     
     protected $fillable = [
         'tenant_id',
+        'wa_account_id',
         'from_number',
         'from_name',
         'message',

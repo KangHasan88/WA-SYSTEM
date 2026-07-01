@@ -8,6 +8,7 @@ class ApiMessageRequest extends Model
 {
     protected $fillable = [
         'tenant_id',
+        'wa_account_id',
         'message_id',
         'api_client_id',
         'to_number',

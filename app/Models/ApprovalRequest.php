@@ -8,6 +8,7 @@ class ApprovalRequest extends Model
 {
     protected $fillable = [
         'tenant_id',
+        'wa_account_id',
         'approval_id',
         'code',
         'api_client_id',

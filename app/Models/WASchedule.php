@@ -11,6 +11,7 @@ class WASchedule extends Model
     
     protected $fillable = [
         'tenant_id',
+        'wa_account_id',
         'title',
         'message',
         'image_url',
